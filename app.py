@@ -31,17 +31,17 @@ def summarize():
         # Fetch messages from the last hour
         response = client.conversations_history(channel=channel_id, limit=100)
 
-        messages = response["messages"][::-1]  # Reverse order (oldest to newest)
+        messages = response["messages"]
         text_to_summarize = " ".join([msg["text"] for msg in messages])
-        print(text_to_summarize)
+        # print(text_to_summarize)
 
         # Generate summary
         summary = summarizer(text_to_summarize, max_length=300, min_length=30, do_sample=False)
         formatted_summary = summary[0]["summary_text"]
 
-        print(formatted_summary)
+        # print(formatted_summary)
         # Send summary back to Slack
-        # client.chat_postMessage(channel=channel_id, text=f"*Summary of the last hour:*\n {formatted_summary}")
+        client.chat_postMessage(channel=channel_id, text=f"*Summary of the last hour:*\n {formatted_summary}")
 
         return jsonify({"response_type": "in_channel", "text": "Summarization complete!"})
 
