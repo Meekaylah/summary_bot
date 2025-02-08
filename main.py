@@ -1,14 +1,14 @@
-import os
-import logging
 import asyncio
-from datetime import datetime
-from typing import Dict, List, Tuple
+import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from typing import Dict, List
 
 import openai
 from dotenv import load_dotenv
-from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+from slack_bolt.async_app import AsyncApp
 
 # Enhanced logging setup
 logging.basicConfig(
@@ -53,13 +53,13 @@ async def get_user_display_name(client, user_id: str) -> str:
 
 
 async def get_channel_messages(
-    client, channel_id: str, last_ts: str
+    client, channel_id: str, oldest_ts: str
 ) -> List[Dict]:
     """Gets messages efficiently using pagination and concurrency."""
     try:
-        # Get messages from last_ts to now
+        # Get messages from oldest_ts (which has been adjusted to exclude the bot’s last gist)
         response = await client.conversations_history(
-            channel=channel_id, oldest=last_ts, limit=1000, inclusive=True
+            channel=channel_id, oldest=oldest_ts, limit=1000, inclusive=True
         )
 
         # Reverse the messages to get oldest first
@@ -208,22 +208,24 @@ def generate_chunk_summary(
 async def process_gist(channel_id: str, client):
     """Process gist with chronological summarization in threads."""
     try:
-        # Get bot ID and last message
+        # Get bot ID and check for the last gist message (using our unique marker)
         bot_id = (await client.auth_test())["user_id"]
         response = await client.conversations_history(
-            channel=channel_id, limit=1
+            channel=channel_id, limit=100
         )
-        last_ts = next(
-            (
-                msg["ts"]
-                for msg in response.get("messages", [])
-                if msg.get("user") == bot_id
-            ),
-            "0",
-        )
+        last_ts = "0"
+        for msg in response.get("messages", []):
+            if msg.get("user") == bot_id and msg.get("text", "").startswith(
+                "Abeg make I tell you wetin don happen:"
+            ):
+                last_ts = msg["ts"]
+                break
 
-        # Get and format messages
-        messages = await get_channel_messages(client, channel_id, last_ts)
+        # Adjust oldest_ts to be just after the bot's last gist message (if exists)
+        oldest_ts = str(float(last_ts) + 0.000001) if last_ts != "0" else "0"
+
+        # Get and format messages posted after the last gist message
+        messages = await get_channel_messages(client, channel_id, oldest_ts)
         if not messages:
             await client.chat_postMessage(
                 channel=channel_id,
@@ -241,20 +243,29 @@ async def process_gist(channel_id: str, client):
             None, generate_chunk_summary, chunks[0], 1, len(chunks)
         )
 
-        # Post initial message with first summary
-        initial_message = await client.chat_postMessage(
-            channel=channel_id,
-            text=f"Abeg make I tell you wetin don happen:\n\n{first_summary}",
-        )
-        thread_ts = initial_message["ts"]
+        # Post summary as a thread reply if a previous gist exists
+        if last_ts != "0":
+            # Reply to the last gist message
+            await client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=last_ts,
+                text=f"Abeg make I tell you wetin don happen:\n\n{first_summary}",
+            )
+            thread_ts = last_ts
+        else:
+            # No previous gist found; post a new message and use its ts for threading
+            initial_message = await client.chat_postMessage(
+                channel=channel_id,
+                text=f"Abeg make I tell you wetin don happen:\n\n{first_summary}",
+            )
+            thread_ts = initial_message["ts"]
 
-        # Process remaining chunks in thread pool chronologically
+        # Process remaining chunks in thread pool chronologically and post as thread replies
         with ThreadPoolExecutor() as executor:
             for i, chunk in enumerate(chunks[1:], 2):
                 summary = await asyncio.get_event_loop().run_in_executor(
                     executor, generate_chunk_summary, chunk, i, len(chunks)
                 )
-
                 await client.chat_postMessage(
                     channel=channel_id,
                     thread_ts=thread_ts,
