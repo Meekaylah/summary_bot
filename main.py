@@ -184,7 +184,7 @@ def generate_chunk_summary(
                 },
                 {"role": "user", "content": f"Continue the gist:\n{chunk}"},
             ],
-            temperature=0.5,
+            temperature=0.7,
         )
         return response.choices[0].message.content
     except Exception as e:
