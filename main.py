@@ -203,7 +203,6 @@ def generate_chunk_summary(
 
 
 async def process_gist(channel_id: str, client):
-    """Process gist with chronological summarization in threads and forwards previous gist if exists."""
     try:
         # Get the bot's user ID
         bot_id = (await client.auth_test())["user_id"]
@@ -211,18 +210,21 @@ async def process_gist(channel_id: str, client):
             channel=channel_id, limit=1000
         )
 
-        # Use the bot's last message (if any) regardless of its text content.
+        # Find the last bot message timestamp
         last_bot_ts = None
         for msg in response.get("messages", []):
             if msg.get("user") == bot_id:
                 last_bot_ts = msg["ts"]
                 break
 
-        # Compute oldest_ts to only fetch messages posted after the last bot message (if exists)
-        oldest_ts = str(float(last_bot_ts) + 0.000001) if last_bot_ts else "0"
+        # Get messages after the last bot message or from the beginning if no bot message
+        messages = await get_channel_messages(
+            client, channel_id, last_bot_ts or "0"
+        )
 
-        # Get and format messages posted after the last bot message
-        messages = await get_channel_messages(client, channel_id, oldest_ts)
+        # Filter out any bot messages
+        messages = [msg for msg in messages if msg.get("user") != bot_id]
+
         if not messages:
             await client.chat_postMessage(
                 channel=channel_id,
@@ -249,18 +251,20 @@ async def process_gist(channel_id: str, client):
                 )
                 permalink = permalink_response.get("permalink", "")
                 if permalink:
-                    forward_text = f"As we been yarn for the last gist {permalink}\n\n"
+                    forward_text = (
+                        f"As we been yarn for the last gist {permalink}\n\n"
+                    )
             except Exception as e:
                 logger.error(f"Failed to get permalink for previous gist: {e}")
 
-        # Always post a new gist message (as a new thread starter)
+        # Post new gist message
         initial_message = await client.chat_postMessage(
             channel=channel_id,
             text=f"{forward_text}Make we continue from where we stop!:\n\n{first_summary}",
         )
         thread_ts = initial_message["ts"]
 
-        # Process remaining chunks in thread pool and post as thread replies to the new gist
+        # Process remaining chunks
         with ThreadPoolExecutor() as executor:
             for i, chunk in enumerate(chunks[1:], 2):
                 summary = await asyncio.get_event_loop().run_in_executor(
