@@ -166,7 +166,7 @@ def generate_chunk_summary(
             )
 
         response = openai_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "system",
@@ -184,7 +184,7 @@ def generate_chunk_summary(
                 },
                 {"role": "user", "content": f"Continue the gist:\n{chunk}"},
             ],
-            temperature=0.7,
+            temperature=0.5,
         )
         return response.choices[0].message.content
     except Exception as e:
