@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from typing import Dict, List
 
 import openai
@@ -10,7 +9,6 @@ from dotenv import load_dotenv
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-# Enhanced logging setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(threadName)s] %(message)s",
@@ -34,7 +32,7 @@ openai_client = openai.OpenAI(
 
 USER_CACHE: Dict[str, str] = {}
 ONGOING_GISTS: Dict[str, asyncio.Task] = {}
-CHUNK_SIZE = 5000  # Token size for each summary chunk
+CHUNK_SIZE = 5000
 
 
 async def get_user_display_name(client, user_id: str) -> str:
@@ -57,15 +55,11 @@ async def get_channel_messages(
 ) -> List[Dict]:
     """Gets messages efficiently using pagination and concurrency."""
     try:
-        # Get messages from oldest_ts (which has been adjusted to exclude already summarized messages)
         response = await client.conversations_history(
             channel=channel_id, oldest=oldest_ts, limit=1000, inclusive=True
         )
 
-        # Reverse the messages to get oldest first
         messages = list(reversed(response["messages"]))
-
-        # Process threads chronologically
         threads = [msg for msg in messages if msg.get("thread_ts")]
 
         if threads:
@@ -81,12 +75,10 @@ async def get_channel_messages(
                 *tasks, return_exceptions=True
             )
 
-            # Insert thread replies in chronological order
             for thread, resp in zip(threads, thread_responses):
                 if isinstance(resp, dict):
                     thread_index = messages.index(thread)
                     thread_messages = resp.get("messages", [])
-                    # Remove the parent message from thread replies to avoid duplication
                     thread_messages = [
                         msg
                         for msg in thread_messages
@@ -110,7 +102,6 @@ def chunk_messages(formatted_messages: str) -> List[str]:
     current_size = 0
 
     for message in messages:
-        # Rough estimate: 1 token ≈ 4 characters
         message_size = len(message) // 4
 
         if current_size + message_size > CHUNK_SIZE:
@@ -148,14 +139,12 @@ async def format_messages(messages: List[Dict], client) -> str:
                 continue
 
             username = USER_CACHE.get(user_id, "Unknown User")
-            ts = datetime.fromtimestamp(float(msg["ts"])).strftime("%I:%M %p")
-
             is_thread_reply = (
                 "thread_ts" in msg and msg["thread_ts"] != msg["ts"]
             )
             prefix = "  └ " if is_thread_reply else ""
             formatted.append(
-                f"{prefix}{username} at {ts}: {msg.get('text', '')}"
+                f"{prefix}{username}: {msg.get('text', '')}"
             )
 
         except Exception as e:
@@ -169,7 +158,6 @@ def generate_chunk_summary(
 ) -> str:
     """Generates summary for a specific chunk with context."""
     try:
-        # Adjust context based on chunk position
         if chunk_number == 1:
             context = "Start the gist from beginning. This is the first part."
         else:
@@ -187,8 +175,10 @@ def generate_chunk_summary(
                         "Rules:\n"
                         "- Use pure Nigerian Pidgin English\n"
                         "- Keep am short but detailed\n"
-                        "- Focus on main drama and important points\n"
-                        "- Make e flow like natural conversation\n"
+                        "- Focus only on the messages provided\n"
+                        "- Add funny Nigerian expressions and reactions\n"
+                        "- Make e funny but still pass the message\n"
+                        "- No need to mention time stamps\n"
                         f"- {context}\n"
                     ),
                 },
@@ -204,25 +194,21 @@ def generate_chunk_summary(
 
 async def process_gist(channel_id: str, client):
     try:
-        # Get the bot's user ID
         bot_id = (await client.auth_test())["user_id"]
         response = await client.conversations_history(
             channel=channel_id, limit=1000
         )
 
-        # Find the last bot message timestamp
         last_bot_ts = None
         for msg in response.get("messages", []):
             if msg.get("user") == bot_id:
                 last_bot_ts = msg["ts"]
                 break
 
-        # Get messages after the last bot message or from the beginning if no bot message
         messages = await get_channel_messages(
             client, channel_id, last_bot_ts or "0"
         )
 
-        # Filter out any bot messages
         messages = [msg for msg in messages if msg.get("user") != bot_id]
 
         if not messages:
@@ -237,12 +223,10 @@ async def process_gist(channel_id: str, client):
 
         logger.info(f"Processing summary for channel {channel_id}")
 
-        # Generate first chunk summary for main message
         first_summary = await asyncio.get_event_loop().run_in_executor(
             None, generate_chunk_summary, chunks[0], 1, len(chunks)
         )
 
-        # Prepare forward text using the previous gist (if any)
         forward_text = ""
         if last_bot_ts:
             try:
@@ -257,14 +241,12 @@ async def process_gist(channel_id: str, client):
             except Exception as e:
                 logger.error(f"Failed to get permalink for previous gist: {e}")
 
-        # Post new gist message
         initial_message = await client.chat_postMessage(
             channel=channel_id,
             text=f"{forward_text}Make we continue from where we stop!:\n\n{first_summary}",
         )
         thread_ts = initial_message["ts"]
 
-        # Process remaining chunks
         with ThreadPoolExecutor() as executor:
             for i, chunk in enumerate(chunks[1:], 2):
                 summary = await asyncio.get_event_loop().run_in_executor(
