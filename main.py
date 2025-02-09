@@ -208,7 +208,7 @@ async def process_gist(channel_id: str, client):
         # Get the bot's user ID
         bot_id = (await client.auth_test())["user_id"]
         response = await client.conversations_history(
-            channel=channel_id, limit=100
+            channel=channel_id, limit=1000
         )
 
         # Use the bot's last message (if any) regardless of its text content.
@@ -245,7 +245,7 @@ async def process_gist(channel_id: str, client):
         if last_bot_ts:
             try:
                 permalink_response = await client.chat_getPermalink(
-                    channel=channel_id, message_ts=last_bot_ts
+                    channel=channel_id, message_ts=last_bot_ts, limit=1000
                 )
                 permalink = permalink_response.get("permalink", "")
                 if permalink:
