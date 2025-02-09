@@ -143,9 +143,7 @@ async def format_messages(messages: List[Dict], client) -> str:
                 "thread_ts" in msg and msg["thread_ts"] != msg["ts"]
             )
             prefix = "  └ " if is_thread_reply else ""
-            formatted.append(
-                f"{prefix}{username}: {msg.get('text', '')}"
-            )
+            formatted.append(f"{prefix}{username}: {msg.get('text', '')}")
 
         except Exception as e:
             logger.error(f"Error formatting message: {e}")
@@ -153,17 +151,14 @@ async def format_messages(messages: List[Dict], client) -> str:
     return "\n".join(formatted)
 
 
-def generate_chunk_summary(
-    chunk: str, chunk_number: int, total_chunks: int
-) -> str:
-    """Generates summary for a specific chunk with context."""
+def generate_chunk_summary(chunk: str, previous_summary: str = "") -> str:
+    """Generates a natural, flowing summary continuing from the previous one if it exists."""
     try:
-        if chunk_number == 1:
-            context = "Start the gist from beginning. This is the first part."
+        context = ""
+        if previous_summary:
+            context = f"This na continuation of:\n{previous_summary}\n\nMake the new gist flow from the previous one."
         else:
-            context = (
-                "This na continuation of the gist. Make e flow like one story."
-            )
+            context = "Start a fresh gist. Make it flow like one sweet story."
 
         response = openai_client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -171,24 +166,25 @@ def generate_chunk_summary(
                 {
                     "role": "system",
                     "content": (
-                        "You be Nigerian wey dey share gist for slack channel. "
+                        "You be Nigerian wey dey tell sweet gist for slack channel. "
                         "Rules:\n"
-                        "- Use pure Nigerian Pidgin English\n"
-                        "- Keep am short but detailed\n"
-                        "- Focus only on the messages provided\n"
-                        "- Add funny Nigerian expressions and reactions\n"
-                        "- Make e funny but still pass the message\n"
-                        "- No need to mention time stamps\n"
+                        "- Tell am like one interesting story wey people missed\n"
+                        "- Focus on the main drama and important things\n"
+                        "- No need to mention each person separately\n"
+                        "- Make e flow naturally like you dey tell story\n"
+                        "- Add funny Nigerian expressions when e make sense\n"
+                        "- No need to mention time or names unless na important part of the gist\n"
+                        "- Abeg no talk wetin no happen ohh even for your summary or explanation"
                         f"- {context}\n"
                     ),
                 },
-                {"role": "user", "content": f"Continue the gist:\n{chunk}"},
+                {"role": "user", "content": f"Tell me wetin happen:\n{chunk}"},
             ],
             temperature=0.7,
         )
         return response.choices[0].message.content
     except Exception as e:
-        logger.error(f"Summary generation error for chunk {chunk_number}: {e}")
+        logger.error(f"Summary generation error: {e}")
         return "System don tire! Try again later."
 
 
@@ -223,40 +219,34 @@ async def process_gist(channel_id: str, client):
 
         logger.info(f"Processing summary for channel {channel_id}")
 
-        first_summary = await asyncio.get_event_loop().run_in_executor(
-            None, generate_chunk_summary, chunks[0], 1, len(chunks)
-        )
+        current_summary = generate_chunk_summary(chunks[0])
 
         forward_text = ""
         if last_bot_ts:
             try:
                 permalink_response = await client.chat_getPermalink(
-                    channel=channel_id, message_ts=last_bot_ts, limit=1000
+                    channel=channel_id, message_ts=last_bot_ts
                 )
                 permalink = permalink_response.get("permalink", "")
                 if permalink:
-                    forward_text = (
-                        f"As we been yarn for the last gist {permalink}\n\n"
-                    )
+                    forward_text = f"As we been yarn for {permalink}\n\n"
             except Exception as e:
-                logger.error(f"Failed to get permalink for previous gist: {e}")
+                logger.error(f"Failed to get permalink: {e}")
 
         initial_message = await client.chat_postMessage(
             channel=channel_id,
-            text=f"{forward_text}Make we continue from where we stop!:\n\n{first_summary}",
+            text=f"{forward_text}New gist don land!\n\n{current_summary}",
         )
         thread_ts = initial_message["ts"]
 
-        with ThreadPoolExecutor() as executor:
-            for i, chunk in enumerate(chunks[1:], 2):
-                summary = await asyncio.get_event_loop().run_in_executor(
-                    executor, generate_chunk_summary, chunk, i, len(chunks)
-                )
-                await client.chat_postMessage(
-                    channel=channel_id,
-                    thread_ts=thread_ts,
-                    text=summary,
-                )
+        for chunk in chunks[1:]:
+            logger.info(current_summary)
+            current_summary = generate_chunk_summary(chunk, current_summary)
+            await client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=current_summary,
+            )
 
     except Exception as e:
         logger.error(f"Gist processing error: {e}")
