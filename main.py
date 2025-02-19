@@ -162,7 +162,7 @@ def generate_chunk_summary(
             context = "Start the gist from beginning. This is the first part."
         else:
             context = (
-                "This na continuation of the gist. Make e flow like one story."
+                "This is a continuation of the gist. Let it flow like one story."
             )
 
         response = openai_client.chat.completions.create(
@@ -171,13 +171,15 @@ def generate_chunk_summary(
                 {
                     "role": "system",
                     "content": (
-                        "You be Nigerian wey dey share gist for slack channel. "
+                        # "You be Nigerian wey dey share gist for slack channel. "
+                        # "Rules:\n"
+                        "You are sharing a summary of everything that happened in a slack channel. "
                         "Rules:\n"
-                        "- Use pure Nigerian Pidgin English\n"
-                        "- Keep am short but detailed\n"
+                        # "- Use pure Nigerian Pidgin English\n"
+                        "- Keep it short but detailed\n"
                         "- Focus only on the messages provided\n"
-                        "- Add funny Nigerian expressions and reactions\n"
-                        "- Make e funny but still pass the message\n"
+                        # "- Add funny Nigerian expressions and reactions\n"
+                        "- Make it funny but still pass the message\n"
                         "- No need to mention time stamps\n"
                         f"- {context}\n"
                     ),
@@ -189,7 +191,7 @@ def generate_chunk_summary(
         return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Summary generation error for chunk {chunk_number}: {e}")
-        return "System don tire! Try again later."
+        return "I am tired! Try again later."
 
 
 async def process_gist(channel_id: str, client):
@@ -214,7 +216,7 @@ async def process_gist(channel_id: str, client):
         if not messages:
             await client.chat_postMessage(
                 channel=channel_id,
-                text="Nothing new don happen since my last gist o!",
+                text="Nothing new has happened since my last gist!",
             )
             return
 
@@ -236,14 +238,14 @@ async def process_gist(channel_id: str, client):
                 permalink = permalink_response.get("permalink", "")
                 if permalink:
                     forward_text = (
-                        f"As we been yarn for the last gist {permalink}\n\n"
+                        f"So as I was saying before {permalink}\n\n"
                     )
             except Exception as e:
                 logger.error(f"Failed to get permalink for previous gist: {e}")
 
         initial_message = await client.chat_postMessage(
             channel=channel_id,
-            text=f"{forward_text}Make we continue from where we stop!:\n\n{first_summary}",
+            text=f"{forward_text}Let's continue from where we stop!:\n\n{first_summary}",
         )
         thread_ts = initial_message["ts"]
 
@@ -262,7 +264,7 @@ async def process_gist(channel_id: str, client):
         logger.error(f"Gist processing error: {e}")
         await client.chat_postMessage(
             channel=channel_id,
-            text="Ahh! Error don happen. Make you try again.",
+            text="Ahh! There's been an error. Try again please :abidoshaker:",
         )
     finally:
         if channel_id in ONGOING_GISTS:
@@ -281,14 +283,14 @@ async def handle_gist(ack, body, client):
         await client.chat_postEphemeral(
             channel=channel_id,
             user=user_id,
-            text="Hold on, I still dey process the last gist request!",
+            text="Hold on, I'm still processing the last gist request!",
         )
         return
 
     await client.chat_postEphemeral(
         channel=channel_id,
         user=user_id,
-        text="I don receive your gist request. E go soon ready!",
+        text="I've received your gist request. It'll soon be ready!",
     )
 
     ONGOING_GISTS[channel_id] = asyncio.create_task(
