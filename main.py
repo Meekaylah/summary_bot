@@ -143,9 +143,7 @@ async def format_messages(messages: List[Dict], client) -> str:
                 "thread_ts" in msg and msg["thread_ts"] != msg["ts"]
             )
             prefix = "  └ " if is_thread_reply else ""
-            formatted.append(
-                f"{prefix}{username}: {msg.get('text', '')}"
-            )
+            formatted.append(f"{prefix}{username}: {msg.get('text', '')}")
 
         except Exception as e:
             logger.error(f"Error formatting message: {e}")
@@ -153,13 +151,12 @@ async def format_messages(messages: List[Dict], client) -> str:
     return "\n".join(formatted)
 
 
-def generate_chunk_summary(
-    chunk: str, chunk_number: int, total_chunks: int
-) -> str:
-    """Generates summary for a specific chunk with context."""
+def generate_chunk_summary(chunk: str, previous_summary: str = "") -> str:
+    """Generates a natural, flowing summary continuing from the previous one if it exists."""
     try:
-        if chunk_number == 1:
-            context = "Start the gist from beginning. This is the first part."
+        context = ""
+        if previous_summary:
+            context = f"This na continuation of:\n{previous_summary}\n\nMake the new gist flow from the previous one."
         else:
             context = (
                 "This is a continuation of the gist. Let it flow like one story."
@@ -184,7 +181,7 @@ def generate_chunk_summary(
                         f"- {context}\n"
                     ),
                 },
-                {"role": "user", "content": f"Continue the gist:\n{chunk}"},
+                {"role": "user", "content": f"Tell me wetin happen:\n{chunk}"},
             ],
             temperature=0.7,
         )
@@ -225,15 +222,13 @@ async def process_gist(channel_id: str, client):
 
         logger.info(f"Processing summary for channel {channel_id}")
 
-        first_summary = await asyncio.get_event_loop().run_in_executor(
-            None, generate_chunk_summary, chunks[0], 1, len(chunks)
-        )
+        current_summary = generate_chunk_summary(chunks[0])
 
         forward_text = ""
         if last_bot_ts:
             try:
                 permalink_response = await client.chat_getPermalink(
-                    channel=channel_id, message_ts=last_bot_ts, limit=1000
+                    channel=channel_id, message_ts=last_bot_ts
                 )
                 permalink = permalink_response.get("permalink", "")
                 if permalink:
@@ -241,7 +236,7 @@ async def process_gist(channel_id: str, client):
                         f"So as I was saying before {permalink}\n\n"
                     )
             except Exception as e:
-                logger.error(f"Failed to get permalink for previous gist: {e}")
+                logger.error(f"Failed to get permalink: {e}")
 
         initial_message = await client.chat_postMessage(
             channel=channel_id,
@@ -249,16 +244,14 @@ async def process_gist(channel_id: str, client):
         )
         thread_ts = initial_message["ts"]
 
-        with ThreadPoolExecutor() as executor:
-            for i, chunk in enumerate(chunks[1:], 2):
-                summary = await asyncio.get_event_loop().run_in_executor(
-                    executor, generate_chunk_summary, chunk, i, len(chunks)
-                )
-                await client.chat_postMessage(
-                    channel=channel_id,
-                    thread_ts=thread_ts,
-                    text=summary,
-                )
+        for chunk in chunks[1:]:
+            logger.info(current_summary)
+            current_summary = generate_chunk_summary(chunk, current_summary)
+            await client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=current_summary,
+            )
 
     except Exception as e:
         logger.error(f"Gist processing error: {e}")
